@@ -16,6 +16,7 @@ from skimage.measure import label, regionprops
 import os
 import re
 import seaborn as sns
+from skimage.color import label2rgb
 
 
 def process_images(file_name):
@@ -118,7 +119,6 @@ def training_model(df):
 
 
 ###############################################################################################################
-###############################################################################################################
 # Generate a random color scale from a modified Dark2 cmap
 vals = np.linspace(0, 1, 256)
 np.random.shuffle(vals)
@@ -129,8 +129,10 @@ image_name = "test_image.tif"
 file_name = path + image_name
 # out_folder = path + "output/"
 mask = skimage.io.imread(path + "Mask_Final.tif")
+###############################################################################################################
 # Now recall the process_images function to generate the image matrix for prediction
 process_images(file_name)
+###############################################################################################################
 # Visualize gray values histogram from source image - very useful for thresholding
 histogram, bin_edges = np.histogram(image, bins=255, range=(0, 255))
 plt.figure()
@@ -148,7 +150,10 @@ thresh = image < threshold_max
 thresh = skm.binary_erosion(thresh, selem=skm.disk(erode_pixels))
 thresh = skm.binary_dilation(thresh, selem=skm.disk(erode_pixels))
 thresh = ndimage.binary_fill_holes(thresh)
-# # Visualize the source image and the thresholded binary mask, side-by-side
+thresh = label2rgb(label(thresh), bg_label=0)
+
+mask_ov = label2rgb(label(mask), image=image, bg_label=0)
+# Visualize the source image and the thresholded binary mask, side-by-side
 f = plt.figure()
 f.add_subplot(1, 2, 1)
 plt.title("Source Image")
@@ -164,9 +169,11 @@ plt.imshow(image, cmap='gray')
 f.add_subplot(1, 2, 2)
 plt.title("Labeled Mask")
 plt.imshow(mask, cmap=mycmap)
+#############################################
+#############################################
 # Here we train or model based on the open images and respective masks
 training_model(df)
-
+#############################################
 #############################################
 # Here we apply and test the trained model to get a prediction on the desired images
 prediction = model.predict(original_img_data)
@@ -196,12 +203,14 @@ dilate_arr = []
 fill_arr = []
 img_lbl_thr = []
 img_lbl_forest = []
+img_lbl_thr_rgb = []
+img_lbl_forest_rgb = []
 count_thr = []
 count_forest = []
 well = []
 fov = []
 time = []
-
+model_name = "Random_Forest_Intercalation_Model"
 loaded_model = pickle.load(open(model_name, 'rb'))
 erode_pixels = 2
 threshold = 20
@@ -237,7 +246,9 @@ for i in range(0, len(os.listdir(path2))):
     thresholded = ndimage.binary_fill_holes(thresholded)
     thresh_arr.append(thresholded)
     img_lbl_thr.append(label(thresh_arr[i]))
+    img_lbl_thr_rgb.append(label2rgb(img_lbl_thr[i], image=images_arr[i], bg_label=0))
     img_lbl_forest.append(label(segm_arr[i]))
+    img_lbl_forest_rgb.append(label2rgb(img_lbl_forest[i], image=images_arr[i], bg_label=0))
     # plt.imsave(out_folder + 'Segm_' + str(well[i]) + "_" + str(fov[i]) + "_" + str(time[i]) + 'min.jpg', img_lbl[i])
     regions_thr = regionprops(img_lbl_thr[i])
     regions_forest = regionprops(img_lbl_forest[i])
@@ -287,12 +298,13 @@ cond_dict = dict(conditions.to_dict('split')['data'])
 data['Condition'] = data['Well'].map(cond_dict)
 
 # Finally we plot our results: events over time for thresholding and random forest segmentation
-plot = plt.figure()
-sns.scatterplot(data=data, x='Time', y='Count_Thr', hue='Condition', palette="Set2")
+fig = plt.figure()
+plot = sns.scatterplot(data=data, x='Time', y='Count_Thr', hue='Condition', palette="Set2")
 sns.lineplot(data=data, x='Time', y='Count_Thr', hue='Condition', palette="Set2")
-
 sns.scatterplot(data=data, x='Time', y='Count_RF', hue='Condition', palette="Set2")
 sns.lineplot(data=data, x='Time', y='Count_RF', hue='Condition', palette="Set2")
+plot.set_xlabel("Time (min)", fontsize=20)
+plot.set_ylabel("Intercalation Events", fontsize=20)
 
 # Here we want to check the results of the segmentation on our images
 # First we define well,FOV and timepoint of the images to visualize
@@ -311,7 +323,7 @@ f = plt.figure()
 f.add_subplot(1, 3, 1)
 plt.imshow(images_arr[match_index], cmap='gray')
 f.add_subplot(1, 3, 2)
-plt.imshow(img_lbl_thr[match_index], cmap=mycmap)
+plt.imshow(img_lbl_thr_rgb[match_index])
 f.add_subplot(1, 3, 3)
-plt.imshow(img_lbl_forest[match_index], cmap=mycmap)
+plt.imshow(img_lbl_forest_rgb[match_index])
 plt.show(block=True)
