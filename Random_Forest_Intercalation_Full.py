@@ -1,4 +1,3 @@
-import os
 import numpy as np
 import skimage.io
 import pandas as pd
@@ -14,6 +13,9 @@ from skimage.filters import roberts, sobel, scharr, prewitt
 import cv2
 import pickle
 from skimage.measure import label, regionprops
+import os
+import re
+import seaborn as sns
 
 
 def process_images(file_name):
@@ -168,7 +170,6 @@ training_model(df)
 #############################################
 # Here we apply and test the trained model to get a prediction on the desired images
 prediction = model.predict(original_img_data)
-
 segmented = prediction.reshape(image.shape)
 # Subtract 1 to the predicted image to obtain a binary image with values 0 or 1 only
 segmented = segmented - 1
@@ -186,6 +187,7 @@ plt.imshow(segmented, cmap=mycmap)
 ###########################################################################################
 # Testing the model through all images in a folder
 img_files_names = []
+img_basename = []
 images_arr = []
 segm_arr = []
 thresh_arr = []
@@ -196,6 +198,9 @@ img_lbl_thr = []
 img_lbl_forest = []
 count_thr = []
 count_forest = []
+well = []
+fov = []
+time = []
 
 loaded_model = pickle.load(open(model_name, 'rb'))
 erode_pixels = 2
@@ -204,6 +209,16 @@ threshold = 20
 path2 = "C:/Users/Federico/Documents/Python_Image_Processing/test_forest/"
 for i in range(0, len(os.listdir(path2))):
     img_files_names.append(path2 + os.listdir(path2)[i])
+
+    img_basename.append(os.path.basename(img_files_names[i]))
+    well.append(re.search(r"(?<=FITC_Well_).*?(?=_Fov)", img_basename[i]).group(0))
+    well[i] = well[i].replace(' - ', '')
+    fov_timepoint = re.search(r"(?<=_Fov_).*?(?=ms.tif)", img_basename[i]).group(0)
+    fov.append(fov_timepoint.split('_')[0])
+    time_ms = int(fov_timepoint.split('_')[1])
+    time_min = time_ms / 60000
+    time.append(time_min)
+
     images_arr.append(skimage.io.imread(img_files_names[i]))
     process_images(img_files_names[i])
     prediction = loaded_model.predict(original_img_data)
@@ -257,3 +272,46 @@ plt.title("Random Forest")
 plt.imshow(segm_arr[1], cmap=mycmap)
 f.add_subplot(fig_rows, fig_col, 9)
 plt.imshow(segm_arr[2], cmap=mycmap)
+
+# Here we create a dataframe containing the well, FOV, timepoint and counted objects for analysis
+data_create = {'Well': well,
+               'Fov': fov,
+               'Time': time,
+               'Count_Thr': count_thr,
+               'Count_RF': count_forest}
+data = pd.DataFrame(data_create)
+data = data.assign(Id=data["Well"] + "_" + data["Fov"])
+# We read the experimental conditions from an external CSV, create the dictionary to pair wells and conditions, assign the conditions
+conditions = pd.read_csv("C:/Users/Federico/Documents/Python_Image_Processing/Exp_Cond.csv")
+cond_dict = dict(conditions.to_dict('split')['data'])
+data['Condition'] = data['Well'].map(cond_dict)
+
+# Finally we plot our results: events over time for thresholding and random forest segmentation
+plot = plt.figure()
+sns.scatterplot(data=data, x='Time', y='Count_Thr', hue='Condition', palette="Set2")
+sns.lineplot(data=data, x='Time', y='Count_Thr', hue='Condition', palette="Set2")
+
+sns.scatterplot(data=data, x='Time', y='Count_RF', hue='Condition', palette="Set2")
+sns.lineplot(data=data, x='Time', y='Count_RF', hue='Condition', palette="Set2")
+
+# Here we want to check the results of the segmentation on our images
+# First we define well,FOV and timepoint of the images to visualize
+well_vis = "C - 04"
+fov_vis = "03"
+time_vis = 70
+time_ms_vis = str(time_vis * 60000)
+# Then we check for the image name matching the defined parameters
+well_match = [s for s in img_basename if well_vis in s]
+fov_match = [s for s in well_match if fov_vis in s]
+matched = [s for s in fov_match if time_ms_vis in s]
+# And we find the index of the filename in the img_basename array defined before
+match_index = img_basename.index(matched[0])
+# Finally we plot side-by-side the original image, the thresholded binary and the random forest prediction
+f = plt.figure()
+f.add_subplot(1, 3, 1)
+plt.imshow(images_arr[match_index], cmap='gray')
+f.add_subplot(1, 3, 2)
+plt.imshow(img_lbl_thr[match_index], cmap=mycmap)
+f.add_subplot(1, 3, 3)
+plt.imshow(img_lbl_forest[match_index], cmap=mycmap)
+plt.show(block=True)
