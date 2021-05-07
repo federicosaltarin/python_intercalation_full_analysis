@@ -17,6 +17,8 @@ import os
 import re
 import seaborn as sns
 from skimage.color import label2rgb
+from tifffile import imread, imwrite
+import napari
 
 
 def process_images(file_name):
@@ -176,7 +178,10 @@ training_model(df)
 #############################################
 #############################################
 # Here we apply and test the trained model to get a prediction on the desired images
-prediction = model.predict(original_img_data)
+# prediction = model.predict(original_img_data)
+model_name = "Random_Forest_Intercalation_Model"
+loaded_model = pickle.load(open(model_name, 'rb'))
+prediction = loaded_model.predict(original_img_data)
 segmented = prediction.reshape(image.shape)
 # Subtract 1 to the predicted image to obtain a binary image with values 0 or 1 only
 segmented = segmented - 1
@@ -207,9 +212,11 @@ img_lbl_thr_rgb = []
 img_lbl_forest_rgb = []
 count_thr = []
 count_forest = []
+well_fov = []
 well = []
 fov = []
 time = []
+match = []
 model_name = "Random_Forest_Intercalation_Model"
 loaded_model = pickle.load(open(model_name, 'rb'))
 erode_pixels = 2
@@ -220,10 +227,12 @@ for i in range(0, len(os.listdir(path2))):
     img_files_names.append(path2 + os.listdir(path2)[i])
 
     img_basename.append(os.path.basename(img_files_names[i]))
+    well_fov.append(re.search(r"(?<=FITC_Well_).*?(?=Fov_).*?(?=_)", img_basename[i]).group(0))
     well.append(re.search(r"(?<=FITC_Well_).*?(?=_Fov)", img_basename[i]).group(0))
     well[i] = well[i].replace(' - ', '')
     fov_timepoint = re.search(r"(?<=_Fov_).*?(?=ms.tif)", img_basename[i]).group(0)
     fov.append(fov_timepoint.split('_')[0])
+    match.append(well_fov[i] + "_" + fov[i])
     time_ms = int(fov_timepoint.split('_')[1])
     time_min = time_ms / 60000
     time.append(time_min)
@@ -246,43 +255,85 @@ for i in range(0, len(os.listdir(path2))):
     thresholded = ndimage.binary_fill_holes(thresholded)
     thresh_arr.append(thresholded)
     img_lbl_thr.append(label(thresh_arr[i]))
-    img_lbl_thr_rgb.append(label2rgb(img_lbl_thr[i], image=images_arr[i], bg_label=0))
+    # img_lbl_thr_rgb.append(label2rgb(img_lbl_thr[i], image=images_arr[i], bg_label=0))
+    img_lbl_thr_rgb.append(label2rgb(img_lbl_thr[i], bg_label=0))
     img_lbl_forest.append(label(segm_arr[i]))
     img_lbl_forest_rgb.append(label2rgb(img_lbl_forest[i], image=images_arr[i], bg_label=0))
-    # plt.imsave(out_folder + 'Segm_' + str(well[i]) + "_" + str(fov[i]) + "_" + str(time[i]) + 'min.jpg', img_lbl[i])
+    imwrite(path2 + 'Well_' + well[i] + "_FOV_" + fov[i] + "-" + str(time[i]) + '_min_Thr_Segm.tif', img_lbl_thr_rgb[i])
+    # imwrite(path2 + 'Well_' + well[i] + "_FOV_" + fov[i] +"_"+str(time[i])+'_min_RF_segm.tif', img_lbl_forest_rgb[i])
     regions_thr = regionprops(img_lbl_thr[i])
     regions_forest = regionprops(img_lbl_forest[i])
     count_thr.append(len(regions_thr))
     count_forest.append(len(regions_forest))
 
+out_path = path2 + "out/thr/"
+out_names = []
+img_basename = []
+well_fov = []
+well = []
+fov_timepoint = []
+fov = []
+match = []
+for i in range(0, len(os.listdir(out_path))):
+    out_names.append(out_path + os.listdir(out_path)[i])
+    img_basename.append(os.path.basename(out_names[i]))
+    well_fov.append(re.search(r"(?<=Well_).*?(?=FOV_).*?(?=_)", img_basename[i]).group(0))
+    well.append(re.search(r"(?<=Well_).*?(?=_FOV)", img_basename[i]).group(0))
+    well[i] = well[i].replace(' - ', '')
+    fov_timepoint = re.search(r"(?<=_FOV_).*?(?=_min)", img_basename[i]).group(0)
+    fov.append(fov_timepoint.split('-')[0])
+    match.append(well_fov[i] + "_" + fov[i])
+
+match_unique = np.unique(match)
+
+stack = []
+for i in range(0, len(match_unique)):
+    stack_arr = []
+    for j in range(0, len(out_names)):
+        if match_unique[i] in out_names[j]:
+            stack_arr.append((out_names[j]))
+
+    stack.insert(i, stack_arr)
+
+for j in range(0, len(stack)):
+    image_stack = []
+    for i in range(0, len(stack[j])):
+        image_stack.append(skimage.io.imread(stack[j][i]))
+        basename = os.path.basename(stack[j][i])
+        well = (re.search(r"(?<=Well_).*?(?=_FOV)", basename).group(0))
+        fov_timepoint = re.search(r"(?<=_FOV_).*?(?=_min)", basename).group(0)
+        fov = (fov_timepoint.split('_')[0])
+
+    imwrite(out_path + 'Well_' + well + "_FOV_" + fov + '_stack.tif', image_stack)
+
 # Here we visualize and compare 3 different images: original images, thresholded binary and Random Forest pixel classification
-fig_col = 3
-fig_rows = 3
-
-f = plt.figure()
-f.add_subplot(fig_rows, fig_col, 1)
-plt.imshow(images_arr[0], cmap="gray")
-f.add_subplot(fig_rows, fig_col, 2)
-plt.title("Source Image")
-plt.imshow(images_arr[1], cmap="gray")
-f.add_subplot(fig_rows, fig_col, 3)
-plt.imshow(images_arr[2], cmap="gray")
-
-f.add_subplot(fig_rows, fig_col, 4)
-plt.imshow(thresh_arr[0], cmap=mycmap)
-f.add_subplot(fig_rows, fig_col, 5)
-plt.title("Thresholded")
-plt.imshow(thresh_arr[1], cmap=mycmap)
-f.add_subplot(fig_rows, fig_col, 6)
-plt.imshow(thresh_arr[2], cmap=mycmap)
-
-f.add_subplot(fig_rows, fig_col, 7)
-plt.imshow(segm_arr[0], cmap=mycmap)
-f.add_subplot(fig_rows, fig_col, 8)
-plt.title("Random Forest")
-plt.imshow(segm_arr[1], cmap=mycmap)
-f.add_subplot(fig_rows, fig_col, 9)
-plt.imshow(segm_arr[2], cmap=mycmap)
+# fig_col = 3
+# fig_rows = 3
+#
+# f = plt.figure()
+# f.add_subplot(fig_rows, fig_col, 1)
+# plt.imshow(images_arr[0], cmap="gray")
+# f.add_subplot(fig_rows, fig_col, 2)
+# plt.title("Source Image")
+# plt.imshow(images_arr[1], cmap="gray")
+# f.add_subplot(fig_rows, fig_col, 3)
+# plt.imshow(images_arr[2], cmap="gray")
+#
+# f.add_subplot(fig_rows, fig_col, 4)
+# plt.imshow(thresh_arr[0], cmap=mycmap)
+# f.add_subplot(fig_rows, fig_col, 5)
+# plt.title("Thresholded")
+# plt.imshow(thresh_arr[1], cmap=mycmap)
+# f.add_subplot(fig_rows, fig_col, 6)
+# plt.imshow(thresh_arr[2], cmap=mycmap)
+#
+# f.add_subplot(fig_rows, fig_col, 7)
+# plt.imshow(segm_arr[0], cmap=mycmap)
+# f.add_subplot(fig_rows, fig_col, 8)
+# plt.title("Random Forest")
+# plt.imshow(segm_arr[1], cmap=mycmap)
+# f.add_subplot(fig_rows, fig_col, 9)
+# plt.imshow(segm_arr[2], cmap=mycmap)
 
 # Here we create a dataframe containing the well, FOV, timepoint and counted objects for analysis
 data_create = {'Well': well,
@@ -308,22 +359,46 @@ plot.set_ylabel("Intercalation Events", fontsize=20)
 
 # Here we want to check the results of the segmentation on our images
 # First we define well,FOV and timepoint of the images to visualize
-well_vis = "C - 04"
+# well_vis = "C - 04"
+# fov_vis = "03"
+# time_vis = 70
+# time_ms_vis = str(time_vis * 60000)
+# # Then we check for the image name matching the defined parameters
+# well_match = [s for s in img_basename if well_vis in s]
+# fov_match = [s for s in well_match if fov_vis in s]
+# matched = [s for s in fov_match if time_ms_vis in s]
+# # And we find the index of the filename in the img_basename array defined before
+# match_index = img_basename.index(matched[0])
+# # Finally we plot side-by-side the original image, the thresholded binary and the random forest prediction
+# f = plt.figure()
+# f.add_subplot(1, 3, 1)
+# plt.imshow(images_arr[match_index], cmap='gray')
+# f.add_subplot(1, 3, 2)
+# plt.imshow(img_lbl_thr_rgb[match_index])
+# f.add_subplot(1, 3, 3)
+# plt.imshow(img_lbl_forest_rgb[match_index])
+# plt.show(block=True)
+
+well_vis = "C04"
 fov_vis = "03"
-time_vis = 70
-time_ms_vis = str(time_vis * 60000)
-# Then we check for the image name matching the defined parameters
-well_match = [s for s in img_basename if well_vis in s]
-fov_match = [s for s in well_match if fov_vis in s]
-matched = [s for s in fov_match if time_ms_vis in s]
-# And we find the index of the filename in the img_basename array defined before
-match_index = img_basename.index(matched[0])
-# Finally we plot side-by-side the original image, the thresholded binary and the random forest prediction
-f = plt.figure()
-f.add_subplot(1, 3, 1)
-plt.imshow(images_arr[match_index], cmap='gray')
-f.add_subplot(1, 3, 2)
-plt.imshow(img_lbl_thr_rgb[match_index])
-f.add_subplot(1, 3, 3)
-plt.imshow(img_lbl_forest_rgb[match_index])
-plt.show(block=True)
+vis_files_names = []
+vis_files_names_source = []
+read_path = out_path + "stack/"
+source_path = path2 + "stacks/"
+for i in range(0, len(os.listdir(source_path))):
+    vis_files_names_source.append(source_path + os.listdir(source_path)[i])
+    well_match = [s for s in vis_files_names_source if well_vis in s]
+    fov_match_original = [s for s in well_match if fov_vis in s]
+for i in range(0, len(os.listdir(read_path))):
+    vis_files_names.append(read_path + os.listdir(read_path)[i])
+    well_match = [s for s in vis_files_names if well_vis in s]
+    fov_match = [s for s in well_match if fov_vis in s]
+
+source_image = imread(fov_match_original)
+image_thr = imread(fov_match)
+% gui
+qt
+
+viewer = napari.Viewer()
+viewer.add_image(source_image);
+viewer.add_image(image_thr);
