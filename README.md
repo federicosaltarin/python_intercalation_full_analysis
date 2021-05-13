@@ -12,4 +12,4 @@ The random forest classifier is trained based on the given images and then saved
 
 In the last part the trained model is applied to all images through a folder together with the "classical" thresholding aproach.
 
-Finally the results can be visualized.
+Finally the results can be visualized either as images/plots or with Napari visulizer 
